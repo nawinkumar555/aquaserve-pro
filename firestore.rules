@@ -1,0 +1,83 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.admin == true;
+    }
+    // Interim signal for "recognized employee" — true once a technician
+    // has a doc under users/{uid}. Anyone signed in WITHOUT one is
+    // treated as neither admin nor employee below. This is stricter
+    // than today's App.jsx fallback on purpose — check before deploying
+    // that every real technician account actually has a users/ doc.
+    function isEmployee() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+    function isStaff() {
+      return isAdmin() || isEmployee();
+    }
+
+      match /customers/{id} {
+      allow read: if isStaff();   // technicians look up phone numbers for WhatsApp sends
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() ||
+        (isStaff() &&
+         request.resource.data.diff(resource.data).affectedKeys()
+           .hasOnly(['warrantyServicesCompleted', 'warrantyPending', 'ledgerServiceHistory', 'allServiceHistory', 'lastServiceDate']));
+    }
+    match /inventory/{id} {
+      allow read: if isStaff();
+      allow write: if isStaff();  // technicians deduct stock on job completion directly from the client today —
+                                   // tighten to isAdmin() once deduction moves server-side (Phase 3)
+    }
+    match /stockMovements/{id} {
+      allow read: if isAdmin();
+      allow create: if isStaff(); // written as a side effect of job completion and store sales
+      allow update, delete: if isAdmin();
+    }
+    match /quotations/{id} {
+      allow read, write: if isAdmin();
+    }
+    match /excludedCustomers/{id} {
+      allow read, write: if isAdmin();
+    }
+    match /completedJobs/{id} {
+      allow read: if isStaff();
+      allow create: if isStaff(); // technicians create their own on job completion
+      allow update, delete: if isAdmin();
+    }
+    match /storeSales/{id} {
+      allow read, write: if isAdmin();
+    }
+    match /tasks/{id} {
+      allow read: if isStaff();
+      allow write: if isStaff();  // admin assigns, technician deletes their own on completion —
+                                   // tighten to "only your own task" once tasks carry a uid (Phase 2)
+    }
+    match /staffStatus/{id} {
+      allow read: if isStaff();
+      allow write: if isStaff();  // matched by name, not uid, right now — same Phase 2 dependency as tasks
+    }
+    match /attendance/{id} {
+      allow read: if isStaff();
+      allow write: if isStaff();
+    }
+    match /users/{id} {
+      allow read: if isStaff();
+      allow write: if isAdmin();
+    }
+    match /locks/{id} {
+      allow read, write: if false; // Cloud Functions use the Admin SDK and bypass rules entirely — no client needs this
+    }
+    match /auditLog/{id} {
+      allow read: if isAdmin();
+      allow write: if false; // only the backend should ever write these
+    }
+
+    // Anything not explicitly matched above is denied by default —
+    // if you add a new collection later, it needs its own rule here.
+  }
+}

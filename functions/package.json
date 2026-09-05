@@ -1,0 +1,16 @@
+{
+  "name": "aquaserve-excel-sync-functions",
+  "description": "Backend API for real-time Excel-Warranty_Ledger/Flat writeback",
+  "engines": {
+    "node": "20"
+  },
+  "main": "index.js",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "exceljs": "^4.4.0",
+    "express": "^4.19.2",
+    "firebase-admin": "^14.2.0",
+    "firebase-functions": "^7.3.2"
+  },
+  "private": true
+}
