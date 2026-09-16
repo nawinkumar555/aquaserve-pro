@@ -41,6 +41,8 @@ const Ic = {
   star:     (p) => <Icon {...p} d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z" />,
   target:   (p) => <Icon {...p} d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z" d2="M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" />,
   route:    (p) => <Icon {...p} d="M6 3v12a3 3 0 0 0 3 3h9M6 3a2 2 0 1 1 0 .001M18 18a2 2 0 1 1 0 .001" />,
+  camera:   (p) => <Icon {...p} d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" d2="M12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" />,
+  image:    (p) => <Icon {...p} d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z" d2="M8.5 10a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM21 15l-5-5L5 21" />,
 };
 
 /* ════════════════════════════════════════════════════════════
@@ -294,25 +296,52 @@ const AdminDashboard = () => {
   ══════════════════════════════════════════════════════════ */
   const quotItemIdCounter = useRef(0);
   const makeQuotItemRow = () => ({ id: `quot-item-${quotItemIdCounter.current++}`, description: "", quantity: "1", price: "" });
-  const [quotClientName, setQuotClientName] = useState("");
-  const [quotContactPerson, setQuotContactPerson] = useState("");
-  const [quotPhone, setQuotPhone] = useState("");
-  const [quotEmail, setQuotEmail] = useState("");
-  const [quotAddress, setQuotAddress] = useState("");
-  const [quotValidUntil, setQuotValidUntil] = useState(() => {
-    const d = new Date(); d.setDate(d.getDate() + 15);
-    return d.toISOString().split("T")[0];
-  });
-  const [quotTaxPercent, setQuotTaxPercent] = useState("18");
-  const [quotTerms, setQuotTerms] = useState(
-    "1. Prices are valid until the date mentioned above.\n" +
-    "2. 50% advance required to confirm the order; balance on completion.\n" +
-    "3. Installation and standard warranty included as per company policy.\n" +
-    "4. Any additional plumbing/electrical work will be charged separately.\n" +
-    "5. Delivery/installation timeline: 3-7 working days from confirmation."
+  // ── Company logo (shown on the quotation form + embedded in the PDF) ──
+  const [quotLogoDataUrl, setQuotLogoDataUrl] = useState("");
+  const quotLogoFileRef = useRef(null);
+  // ── Company / business profile (shown at the top of the quotation form,
+  // matches the "Easy Quotation" style company-details section) ──
+  const [quotCompanyName, setQuotCompanyName] = useState("AquaServe Pro");
+  const [quotCompanyGst, setQuotCompanyGst] = useState("");
+  const [quotCompanyAddress1, setQuotCompanyAddress1] = useState("");
+  const [quotCompanyAddress2, setQuotCompanyAddress2] = useState("");
+  const [quotCompanyContact, setQuotCompanyContact] = useState("");
+  const [quotCompanyEmail, setQuotCompanyEmail] = useState("");
+  const [quotWebsite, setQuotWebsite] = useState("");
+  // ── Quotation meta ──
+  const [quotationNumber, setQuotationNumber] = useState("QUO 001");
+  const [quotPoNumber, setQuotPoNumber] = useState("");
+  const [quotDate, setQuotDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [quotHeader, setQuotHeader] = useState("Quotation");
+  const [quotCurrency, setQuotCurrency] = useState("INR (₹)");
+  // ── Client details ──
+  const [quotClientCompanyName, setQuotClientCompanyName] = useState("");
+  const [quotClientGst, setQuotClientGst] = useState("");
+  const [quotClientContactNo, setQuotClientContactNo] = useState("");
+  const [quotClientEmail, setQuotClientEmail] = useState("");
+  const [quotAtt, setQuotAtt] = useState("");
+  const [quotClientAddress, setQuotClientAddress] = useState("");
+  // ── Message block ──
+  const [quotSalutation, setQuotSalutation] = useState("Dear Client,");
+  const [quotMessage, setQuotMessage] = useState(
+    "Please find below a cost-breakdown for the quotation. Please consider this, and do not hesitate to contact me with any question."
   );
+  const [quotClosing, setQuotClosing] = useState("Many thanks,");
+  const [quotSignee, setQuotSignee] = useState("");
+  // ── Footer note + terms line (shown below the items) ──
+  const [quotFooterNote, setQuotFooterNote] = useState(
+    "Many thanks for your custom! I look forward to doing business with you."
+  );
+  const [quotTermsNote, setQuotTermsNote] = useState("Quotation terms: Valid up to 7 days.");
+  const [quotTaxPercent, setQuotTaxPercent] = useState("18");
   const [quotItems, setQuotItems] = useState(() => [makeQuotItemRow()]);
   const [quotSubmitting, setQuotSubmitting] = useState(false);
+  // ── Preview-before-send: holds the generated (not yet uploaded) PDF
+  // blob + a snapshot of every field, so the admin can eyeball the
+  // quotation and only then commit to uploading/saving/sending it. ──
+  const [quotPreview, setQuotPreview] = useState(null);
+  const [showQuotPreview, setShowQuotPreview] = useState(false);
+  const [quotSending, setQuotSending] = useState(false);
   const [quotations, setQuotations] = useState([]);
   const [quotationsLoading, setQuotationsLoading] = useState(false);
 
@@ -640,6 +669,13 @@ const AdminDashboard = () => {
           const ledgerDates = rec.ledgerServiceHistory.map(s => s.dateISO).filter(Boolean).sort();
           const lastServiceDate = flatDates.at(-1) || ledgerDates.at(-1) || null;
 
+          // ── NEW: if this customer's pending was manually closed from
+          // the dashboard, keep it closed instead of letting this sync
+          // recompute it back open from the source sheet's raw service
+          // count. ──
+          const existingDocForWarranty = customersRef.current.find(c => c.id === docKey);
+          const warrantyManuallyClosed = !!existingDocForWarranty?.warrantyClosedManually;
+
           const allServiceHistory = [
             ...rec.ledgerServiceHistory.map(s => ({ ...s, source: "Warranty (Ledger)" })),
             ...rec.flatServiceHistory.map(s => ({ ...s, source: "Extra Service (Flat)" })),
@@ -659,8 +695,9 @@ const AdminDashboard = () => {
             ledgerServiceHistory: rec.ledgerServiceHistory,
             flatServiceHistory: rec.flatServiceHistory,
             allServiceHistory,
-            warrantyServicesCompleted: rec.warrantyServicesCompleted,
-            warrantyPending: rec.warrantyPending,
+            warrantyServicesCompleted: warrantyManuallyClosed ? WARRANTY_FREE_SERVICES : rec.warrantyServicesCompleted,
+            warrantyPending: warrantyManuallyClosed ? 0 : rec.warrantyPending,
+            ...(warrantyManuallyClosed ? { warrantyClosedManually: true } : {}),
             lastServiceDate,
             sourceSheets: rec.sourceSheets,
             isMasterSynced: true,
@@ -1092,7 +1129,7 @@ const AdminDashboard = () => {
   // scheme) with the most service history; union all service history +
   // sourceSheets from every doc in the cluster into it; delete the rest,
   // and — critically — record each deleted ID in "excludedCustomers" so
-  // the 15s upstream sync never recreates them, AND remove them from the
+  // the 15s upstream sync never resurrects them, AND remove them from the
   // synced Excel files via the same backend the manual delete button
   // uses, so Excel and Firestore stay consistent. ──
   const handleMergeCluster = async (cluster) => {
@@ -1288,6 +1325,30 @@ const AdminDashboard = () => {
     window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`, "_blank");
   };
 
+  // ── NEW: manually close out remaining warranty pending services for a
+  // customer — sets pending to 0 immediately in Firestore/dashboard, and
+  // flags the doc so the 15s Ledger/Flat re-sync doesn't recompute and
+  // re-open it based on the source sheet's service count. ──
+  const handleCloseWarrantyPending = async (c) => {
+    if (!window.confirm(`Mark all warranty services as used for ${c.name}? This clears their pending count to 0.`)) return;
+    try {
+      await updateDoc(doc(db, "customers", c.id), {
+        warrantyPending: 0,
+        warrantyServicesCompleted: WARRANTY_FREE_SERVICES,
+        warrantyClosedManually: true,
+      });
+    } catch (e) {
+      console.error("Close warranty pending error:", e);
+      alert("Failed to update warranty status. Please try again.");
+    }
+  };
+
+  // ── NEW: helper for the two new "recent year" filter options below —
+  // true if a stored ISO-ish date string ("YYYY-MM-DD") falls in 2025
+  // or 2026. Used for both the warranty (installDateISO) and service
+  // (lastServiceDate) recent-client filters.
+  const isYear2025Or2026 = (dateISO) => dateISO?.slice(0, 4) === "2025" || dateISO?.slice(0, 4) === "2026";
+
   const processedList = [...customers]
     .filter(c => {
       const q = searchTerm.toLowerCase();
@@ -1295,7 +1356,9 @@ const AdminDashboard = () => {
       return ok && (filterStatus === "All" || filterStatus === "Alphabetical" ||
         (filterStatus === "PendingService" && c.warrantyPending > 0) ||
         (filterStatus === "Warranty" && c.sourceSheets?.includes("ledger")) ||
-        (filterStatus === "NonWarranty" && c.sourceSheets && !c.sourceSheets.includes("ledger")));
+        (filterStatus === "NonWarranty" && c.sourceSheets && !c.sourceSheets.includes("ledger")) ||
+        (filterStatus === "WarrantyRecent" && c.sourceSheets?.includes("ledger") && isYear2025Or2026(c.installDateISO)) ||
+        (filterStatus === "ServiceRecent" && c.sourceSheets && !c.sourceSheets.includes("ledger") && isYear2025Or2026(c.lastServiceDate)));
     })
     .sort((a, b) => filterStatus === "Alphabetical" ? (a.name || "").localeCompare(b.name || "") : 0);
 
@@ -1843,74 +1906,111 @@ const AdminDashboard = () => {
   const quotTaxAmount = Math.round(quotSubtotal * (Number(quotTaxPercent) || 0) / 100);
   const quotGrandTotal = quotSubtotal + quotTaxAmount;
 
-  // Simple sequential-looking quotation number: AQ-YYYYMM-<short random>.
-  // Not strictly collision-proof under heavy concurrent use, but more
-  // than sufficient for a single-shop admin tool; each quotation's real
-  // uniqueness comes from its Firestore document ID regardless.
-  const generateQuotationNumber = () => {
-    const now = new Date();
-    const ym = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}`;
-    const rand = Math.random().toString(36).slice(2, 6).toUpperCase();
-    return `AQ-${ym}-${rand}`;
+  // ── Reads the chosen logo file as a data URL for both the on-screen
+  // preview and direct embedding into the generated PDF (jsPDF can take
+  // a data URL straight into addImage, no Storage upload required). ──
+  const handleQuotLogoUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      alert("Please choose an image file for the logo.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => setQuotLogoDataUrl(reader.result);
+    reader.onerror = () => alert("Failed to read the logo image. Please try again.");
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
+  // Pulls the currency symbol out of a "INR (₹)" style label, falling
+  // back to "₹" if the label doesn't have a bracketed symbol.
+  const getCurrencySymbol = (label) => {
+    const m = String(label || "").match(/\(([^)]+)\)/);
+    return m ? m[1] : "₹";
   };
 
   const handleCreateQuotation = async () => {
     if (quotSubmitting) return;
     const validItems = quotItems.filter(row => row.description.trim() !== "");
-    if (!quotClientName.trim()) { alert("Please enter the client/company name."); return; }
-    const cleanPhone = quotPhone.toString().replace(/\D/g, "");
-    if (cleanPhone.length < 10) { alert("Please enter a valid phone number to send the quotation via WhatsApp."); return; }
-    if (!validItems.length) { alert("Please add at least one item or service."); return; }
+    if (!quotClientCompanyName.trim()) { alert("Please enter the client company name."); return; }
+    const cleanPhone = quotClientContactNo.toString().replace(/\D/g, "");
+    if (cleanPhone.length < 10) { alert("Please enter a valid client contact number to send the quotation via WhatsApp."); return; }
+    if (!validItems.length) { alert("Please add at least one item."); return; }
 
     setQuotSubmitting(true);
     try {
-      const quotationNumber = generateQuotationNumber();
-      const dateLabel = new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
-      const validUntilLabel = quotValidUntil
-        ? new Date(quotValidUntil).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
-        : "";
+      const sym = getCurrencySymbol(quotCurrency);
+      const dateLabel = quotDate
+        ? new Date(quotDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
+        : new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 
       // ── Build the quotation PDF ──
       const docPdf = new jsPDF();
 
+      let leftX = 14;
+      if (quotLogoDataUrl) {
+        try {
+          docPdf.addImage(quotLogoDataUrl, 14, 8, 22, 22);
+          leftX = 40;
+        } catch (e) {
+          console.error("Logo embed failed:", e);
+        }
+      }
+
       docPdf.setFontSize(20);
       docPdf.setTextColor(37, 99, 235);
-      docPdf.text("AquaServe Pro", 14, 20);
-      docPdf.setFontSize(10);
+      docPdf.text(quotCompanyName || "Company Name", leftX, 20);
+      docPdf.setFontSize(9);
       docPdf.setTextColor(100);
-      docPdf.text("Water Purifier Sales, Installation & Service", 14, 26);
+      let companyY = 26;
+      if (quotCompanyAddress1) { docPdf.text(quotCompanyAddress1, leftX, companyY); companyY += 5; }
+      if (quotCompanyAddress2) { docPdf.text(quotCompanyAddress2, leftX, companyY); companyY += 5; }
+      const companyContactLine = [quotCompanyContact, quotCompanyEmail, quotWebsite].filter(Boolean).join("  ·  ");
+      if (companyContactLine) { docPdf.text(companyContactLine, leftX, companyY); companyY += 5; }
+      if (quotCompanyGst) { docPdf.text(`GST/Tax No: ${quotCompanyGst}`, leftX, companyY); companyY += 5; }
+      companyY = Math.max(companyY, quotLogoDataUrl ? 32 : 0);
 
       docPdf.setFontSize(16);
       docPdf.setTextColor(20);
-      docPdf.text("QUOTATION", 196, 20, { align: "right" });
+      docPdf.text((quotHeader || "Quotation").toUpperCase(), 196, 20, { align: "right" });
       docPdf.setFontSize(10);
       docPdf.setTextColor(90);
-      docPdf.text(`No: ${quotationNumber}`, 196, 26, { align: "right" });
-      docPdf.text(`Date: ${dateLabel}`, 196, 31, { align: "right" });
-      if (validUntilLabel) docPdf.text(`Valid Until: ${validUntilLabel}`, 196, 36, { align: "right" });
+      docPdf.text(`No: ${quotationNumber || "-"}`, 196, 26, { align: "right" });
+      if (quotPoNumber) docPdf.text(`P.O./S.O. No: ${quotPoNumber}`, 196, 31, { align: "right" });
+      docPdf.text(`Date: ${dateLabel}`, 196, quotPoNumber ? 36 : 31, { align: "right" });
 
+      const afterHeaderY = Math.max(companyY, quotPoNumber ? 41 : 36) + 4;
       docPdf.setDrawColor(220);
-      docPdf.line(14, 42, 196, 42);
+      docPdf.line(14, afterHeaderY, 196, afterHeaderY);
 
       docPdf.setFontSize(11);
       docPdf.setTextColor(20);
-      docPdf.text("Quotation For:", 14, 50);
+      docPdf.text("Quotation For:", 14, afterHeaderY + 8);
       docPdf.setFontSize(10);
       docPdf.setTextColor(60);
-      let y = 56;
-      docPdf.text(quotClientName, 14, y); y += 5;
-      if (quotContactPerson) { docPdf.text(`Attn: ${quotContactPerson}`, 14, y); y += 5; }
-      if (quotAddress) {
-        const addrLines = docPdf.splitTextToSize(quotAddress, 100);
+      let y = afterHeaderY + 14;
+      docPdf.text(quotClientCompanyName, 14, y); y += 5;
+      if (quotAtt) { docPdf.text(`Att: ${quotAtt}`, 14, y); y += 5; }
+      if (quotClientAddress) {
+        const addrLines = docPdf.splitTextToSize(quotClientAddress, 100);
         docPdf.text(addrLines, 14, y); y += addrLines.length * 5;
       }
-      if (quotPhone) { docPdf.text(`Phone: ${quotPhone}`, 14, y); y += 5; }
-      if (quotEmail) { docPdf.text(`Email: ${quotEmail}`, 14, y); y += 5; }
+      if (quotClientContactNo) { docPdf.text(`Contact No: ${quotClientContactNo}`, 14, y); y += 5; }
+      if (quotClientEmail) { docPdf.text(`Email: ${quotClientEmail}`, 14, y); y += 5; }
+      if (quotClientGst) { docPdf.text(`GST/Tax No: ${quotClientGst}`, 14, y); y += 5; }
 
-      const tableStartY = Math.max(y + 6, 78);
+      // ── Salutation + message ──
+      if (quotSalutation) { docPdf.text(quotSalutation, 14, y + 4); y += 9; }
+      if (quotMessage) {
+        const msgLines = docPdf.splitTextToSize(quotMessage, 182);
+        docPdf.text(msgLines, 14, y); y += msgLines.length * 5 + 4;
+      }
+
+      const tableStartY = Math.max(y + 4, 90);
       autoTable(docPdf, {
         startY: tableStartY,
-        head: [["#", "Description", "Qty", "Unit Price (₹)", "Amount (₹)"]],
+        head: [["#", "Description", "Qty", `Unit Price (${sym})`, `Amount (${sym})`]],
         body: validItems.map((row, i) => [
           i + 1, row.description, row.quantity || "1",
           (Number(row.price) || 0).toLocaleString("en-IN"),
@@ -1924,55 +2024,118 @@ const AdminDashboard = () => {
       docPdf.setFontSize(10);
       docPdf.setTextColor(60);
       docPdf.text(`Subtotal:`, 150, afterTableY);
-      docPdf.text(`₹${quotSubtotal.toLocaleString("en-IN")}`, 196, afterTableY, { align: "right" });
+      docPdf.text(`${sym}${quotSubtotal.toLocaleString("en-IN")}`, 196, afterTableY, { align: "right" });
       afterTableY += 6;
       docPdf.text(`Tax (${quotTaxPercent || 0}%):`, 150, afterTableY);
-      docPdf.text(`₹${quotTaxAmount.toLocaleString("en-IN")}`, 196, afterTableY, { align: "right" });
+      docPdf.text(`${sym}${quotTaxAmount.toLocaleString("en-IN")}`, 196, afterTableY, { align: "right" });
       afterTableY += 7;
       docPdf.setDrawColor(220);
       docPdf.line(140, afterTableY - 4, 196, afterTableY - 4);
       docPdf.setFontSize(12);
       docPdf.setTextColor(20);
       docPdf.text(`Grand Total:`, 150, afterTableY);
-      docPdf.text(`₹${quotGrandTotal.toLocaleString("en-IN")}`, 196, afterTableY, { align: "right" });
+      docPdf.text(`${sym}${quotGrandTotal.toLocaleString("en-IN")}`, 196, afterTableY, { align: "right" });
 
-      if (quotTerms.trim()) {
-        let termsY = afterTableY + 14;
-        docPdf.setFontSize(11);
-        docPdf.setTextColor(20);
-        docPdf.text("Terms & Conditions:", 14, termsY);
-        termsY += 6;
+      // ── Closing + signee ──
+      let closingY = afterTableY + 14;
+      docPdf.setFontSize(10);
+      docPdf.setTextColor(60);
+      if (quotClosing) { docPdf.text(quotClosing, 14, closingY); closingY += 5; }
+      if (quotSignee) { docPdf.text(quotSignee, 14, closingY); closingY += 8; }
+
+      // ── Footer note + terms line ──
+      if (quotFooterNote.trim()) {
+        const footerLines = docPdf.splitTextToSize(quotFooterNote, 182);
         docPdf.setFontSize(9);
-        docPdf.setTextColor(80);
-        const termsLines = docPdf.splitTextToSize(quotTerms, 182);
-        docPdf.text(termsLines, 14, termsY);
+        docPdf.setTextColor(90);
+        docPdf.text(footerLines, 14, closingY);
+        closingY += footerLines.length * 5 + 4;
+      }
+      if (quotTermsNote.trim()) {
+        docPdf.setFontSize(9);
+        docPdf.setTextColor(120);
+        docPdf.text(quotTermsNote, 14, closingY);
       }
 
-      docPdf.setFontSize(9);
-      docPdf.setTextColor(140);
-      docPdf.text("Thank you for considering AquaServe Pro.", 14, 285);
-
       const pdfBlob = docPdf.output("blob");
-      const fileName = `quotations/${quotationNumber}_${Date.now()}.pdf`;
+
+      // ── Instead of uploading + sending straight away, stash everything
+      // needed and open the preview modal. The actual Storage upload,
+      // Firestore save, and WhatsApp send all happen only once the admin
+      // confirms from that modal (handleConfirmSendQuotation below), so a
+      // mistake caught in the preview costs nothing. ──
+      const previewUrl = URL.createObjectURL(pdfBlob);
+      setQuotPreview({
+        pdfBlob,
+        previewUrl,
+        cleanPhone,
+        sym,
+        validItems,
+        snapshot: {
+          quotationNumber,
+          poNumber: quotPoNumber.trim(),
+          date: quotDate,
+          header: quotHeader,
+          currency: quotCurrency,
+          companyName: quotCompanyName.trim(),
+          companyGst: quotCompanyGst.trim(),
+          companyAddress1: quotCompanyAddress1.trim(),
+          companyAddress2: quotCompanyAddress2.trim(),
+          companyContact: quotCompanyContact.trim(),
+          companyEmail: quotCompanyEmail.trim(),
+          website: quotWebsite.trim(),
+          clientCompanyName: quotClientCompanyName.trim(),
+          clientGst: quotClientGst.trim(),
+          clientContactNo: cleanPhone,
+          clientEmail: quotClientEmail.trim(),
+          att: quotAtt.trim(),
+          clientAddress: quotClientAddress.trim(),
+          salutation: quotSalutation,
+          message: quotMessage,
+          closing: quotClosing,
+          signee: quotSignee.trim(),
+          footerNote: quotFooterNote,
+          termsNote: quotTermsNote,
+          items: validItems.map(({ id, ...rest }) => rest),
+          subtotal: quotSubtotal,
+          taxPercent: Number(quotTaxPercent) || 0,
+          taxAmount: quotTaxAmount,
+          grandTotal: quotGrandTotal,
+        },
+      });
+      setShowQuotPreview(true);
+    } catch (err) {
+      console.error("Quotation generation error:", err);
+      alert("Failed to generate the quotation preview. Please try again.");
+    } finally {
+      setQuotSubmitting(false);
+    }
+  };
+
+  // ── Closes the preview without sending, releasing the temporary blob
+  // URL so the generated PDF isn't left held in memory. ──
+  const closeQuotPreview = () => {
+    if (quotPreview?.previewUrl) URL.revokeObjectURL(quotPreview.previewUrl);
+    setQuotPreview(null);
+    setShowQuotPreview(false);
+  };
+
+  // ── Confirmed from the preview: NOW upload the PDF, save the record,
+  // open WhatsApp, and clear the form. ──
+  const handleConfirmSendQuotation = async () => {
+    if (!quotPreview || quotSending) return;
+    setQuotSending(true);
+    try {
+      const { pdfBlob, cleanPhone, sym, snapshot } = quotPreview;
+
+      const fileName = `quotations/${(snapshot.quotationNumber || "QUO").replace(/[^a-zA-Z0-9-_]/g, "_")}_${Date.now()}.pdf`;
       const storageRef = ref(storage, fileName);
       await uploadBytes(storageRef, pdfBlob);
       const pdfUrl = await getDownloadURL(storageRef);
 
       // ── Save the quotation record for history/resend ──
       await addDoc(collection(db, "quotations"), {
-        quotationNumber,
-        clientName: quotClientName.trim(),
-        contactPerson: quotContactPerson.trim(),
-        phone: cleanPhone,
-        email: quotEmail.trim(),
-        address: quotAddress.trim(),
-        items: validItems.map(({ id, ...rest }) => rest),
-        subtotal: quotSubtotal,
-        taxPercent: Number(quotTaxPercent) || 0,
-        taxAmount: quotTaxAmount,
-        grandTotal: quotGrandTotal,
-        validUntil: quotValidUntil,
-        terms: quotTerms,
+        ...snapshot,
         pdfUrl,
         createdAt: serverTimestamp(),
         createdBy: auth?.currentUser?.uid || "unknown",
@@ -1980,26 +2143,29 @@ const AdminDashboard = () => {
       });
 
       // ── Send via WhatsApp ──
-      const msg = `Hi ${quotContactPerson || quotClientName}, please find the quotation from AquaServe Pro below.\n\nQuotation No: ${quotationNumber}\nTotal: ₹${quotGrandTotal.toLocaleString("en-IN")}\nValid Until: ${validUntilLabel || "N/A"}\n\n${pdfUrl}\n\nFeel free to reach out with any questions. Thank you!`;
+      const msg = `Hi ${snapshot.att || snapshot.clientCompanyName}, please find the quotation from ${snapshot.companyName || "us"} below.\n\nQuotation No: ${snapshot.quotationNumber}\nTotal: ${sym}${(snapshot.grandTotal || 0).toLocaleString("en-IN")}\n\n${pdfUrl}\n\nFeel free to reach out with any questions. Thank you!`;
       window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`, "_blank");
 
-      // ── Reset the form ──
-      setQuotClientName(""); setQuotContactPerson(""); setQuotPhone(""); setQuotEmail(""); setQuotAddress("");
+      // ── Reset the client-specific fields (keep company profile fields) ──
+      setQuotClientCompanyName(""); setQuotClientGst(""); setQuotClientContactNo("");
+      setQuotClientEmail(""); setQuotAtt(""); setQuotClientAddress(""); setQuotPoNumber("");
       setQuotItems([makeQuotItemRow()]);
+      closeQuotPreview();
     } catch (err) {
-      console.error("Quotation creation error:", err);
-      alert("Failed to generate/send the quotation. Please try again.");
+      console.error("Quotation send error:", err);
+      alert("Failed to send the quotation. Please try again.");
     } finally {
-      setQuotSubmitting(false);
+      setQuotSending(false);
     }
   };
 
   // ── Resend a previously generated quotation's existing PDF via
   // WhatsApp, without regenerating it — for a quick follow-up nudge. ──
   const handleResendQuotation = (q) => {
-    const cleanPhone = (q.phone || "").toString().replace(/\D/g, "");
-    if (cleanPhone.length < 10) { alert("This quotation doesn't have a valid phone number on file."); return; }
-    const msg = `Hi ${q.contactPerson || q.clientName}, following up on our quotation from AquaServe Pro.\n\nQuotation No: ${q.quotationNumber}\nTotal: ₹${(q.grandTotal || 0).toLocaleString("en-IN")}\n\n${q.pdfUrl}\n\nLet us know if you have any questions. Thank you!`;
+    const cleanPhone = (q.clientContactNo || q.phone || "").toString().replace(/\D/g, "");
+    if (cleanPhone.length < 10) { alert("This quotation doesn't have a valid contact number on file."); return; }
+    const sym = getCurrencySymbol(q.currency);
+    const msg = `Hi ${q.att || q.clientCompanyName || q.clientName}, following up on our quotation from ${q.companyName || "us"}.\n\nQuotation No: ${q.quotationNumber}\nTotal: ${sym}${(q.grandTotal || 0).toLocaleString("en-IN")}\n\n${q.pdfUrl}\n\nLet us know if you have any questions. Thank you!`;
     window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`, "_blank");
   };
 
@@ -2407,6 +2573,8 @@ const AdminDashboard = () => {
                       <option value="PendingService">Pending Service</option>
                       <option value="Warranty">Warranty (Ledger)</option>
                       <option value="NonWarranty">Non-warranty (Flat only)</option>
+                      <option value="WarrantyRecent">Warranty Client (2025–26)</option>
+                      <option value="ServiceRecent">Service Client (2025–26)</option>
                       <option value="Alphabetical">A – Z</option>
                     </select>
                   </div>
@@ -2429,8 +2597,8 @@ const AdminDashboard = () => {
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                     <thead>
                       <tr style={{ background: dark ? "#0c1526" : "#f8fafc", borderBottom: `1px solid ${C.border}` }}>
-                        {["Client", "Machine", "Installed", "Last Service", "Warranty", ""].map((h, i) => (
-                          <th key={i} style={{ padding: "13px 18px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.09em", color: C.sub, textAlign: i >= 2 ? "center" : "left", ...(i === 5 ? { textAlign: "right" } : {}) }}>{h}</th>
+                        {["Client", "Address", "Machine", "Installed", "Last Service", "Warranty", ""].map((h, i) => (
+                          <th key={i} style={{ padding: "13px 18px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.09em", color: C.sub, textAlign: i >= 3 ? "center" : "left", ...(i === 6 ? { textAlign: "right" } : {}) }}>{h}</th>
                         ))}
                       </tr>
                     </thead>
@@ -2486,6 +2654,9 @@ const AdminDashboard = () => {
                               )}
                             </td>
                             <td style={{ padding: "15px 18px" }}>
+                              <p style={{ fontSize: 12, color: C.sub, fontWeight: 500 }}>{c.address || "—"}</p>
+                            </td>
+                            <td style={{ padding: "15px 18px" }}>
                               <p style={{ fontSize: 12, color: C.sub, fontWeight: 500 }}>{c.machineModel || "—"}</p>
                             </td>
                             <td style={{ padding: "15px 18px", textAlign: "center" }}>
@@ -2496,9 +2667,21 @@ const AdminDashboard = () => {
                             </td>
                             <td style={{ padding: "15px 18px", textAlign: "center" }}>
                               {hasWarrantyData ? (
-                                <span style={{ fontSize: 11, fontWeight: 700, background: pending > 0 ? (dark ? "rgba(245,158,11,.15)" : "#fef3c7") : "#d1fae5", color: pending > 0 ? C.warn : "#065f46", padding: "4px 10px", borderRadius: 8 }}>
-                                  {pending > 0 ? `${pending} pending` : "Fully used"}
-                                </span>
+                                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                                  <span style={{ fontSize: 11, fontWeight: 700, background: pending > 0 ? (dark ? "rgba(245,158,11,.15)" : "#fef3c7") : "#d1fae5", color: pending > 0 ? C.warn : "#065f46", padding: "4px 10px", borderRadius: 8 }}>
+                                    {pending > 0 ? `${pending} pending` : "Fully used"}
+                                  </span>
+                                  {pending > 0 && (
+                                    <button
+                                      onClick={() => handleCloseWarrantyPending(c)}
+                                      title="Mark remaining warranty services as used"
+                                      style={{ ...btn("transparent", C.success, { border: `1.5px solid #a7f3d0`, fontSize: 10, padding: "3px 8px" }) }}
+                                      onMouseEnter={e => e.currentTarget.style.background = "#d1fae5"}
+                                      onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                                      ✓ Close
+                                    </button>
+                                  )}
+                                </div>
                               ) : (
                                 <span style={{ fontSize: 11, color: C.sub }}>—</span>
                               )}
@@ -2526,7 +2709,7 @@ const AdminDashboard = () => {
                         );
                       })}
                       {!processedList.length && (
-                        <tr><td colSpan={6} style={{ padding: "56px 20px", textAlign: "center", color: C.sub }}>
+                        <tr><td colSpan={7} style={{ padding: "56px 20px", textAlign: "center", color: C.sub }}>
                           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
                             <Ic.search size={32} style={{ color: C.border }} />
                             <p style={{ fontSize: 14, fontWeight: 600 }}>No clients match your search</p>
@@ -2868,34 +3051,149 @@ const AdminDashboard = () => {
                 </div>
 
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  <input placeholder="Client / company name *" style={inp} value={quotClientName} onChange={e => setQuotClientName(e.target.value)}
-                    onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.border} />
-                  <input placeholder="Contact person" style={inp} value={quotContactPerson} onChange={e => setQuotContactPerson(e.target.value)}
-                    onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.border} />
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                    <input placeholder="Phone (for WhatsApp) *" style={inp} value={quotPhone} onChange={e => setQuotPhone(e.target.value)}
-                      onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.border} />
-                    <input placeholder="Email (optional)" style={inp} value={quotEmail} onChange={e => setQuotEmail(e.target.value)}
+
+                  {/* ── Logo upload ── */}
+                  <input type="file" accept="image/*" ref={quotLogoFileRef} onChange={handleQuotLogoUpload} style={{ display: "none" }} />
+                  <div style={{ position: "relative", alignSelf: "center", width: "100%", maxWidth: 220 }}>
+                    <div
+                      onClick={() => quotLogoFileRef.current && quotLogoFileRef.current.click()}
+                      style={{
+                        border: `2px dashed ${C.border}`, borderRadius: 14, padding: 18,
+                        display: "flex", flexDirection: "column", alignItems: "center", gap: 10,
+                        cursor: "pointer", background: dark ? "rgba(255,255,255,.02)" : "#fafbff",
+                        transition: "border-color .15s",
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.borderColor = C.accent}
+                      onMouseLeave={e => e.currentTarget.style.borderColor = C.border}>
+                      {quotLogoDataUrl ? (
+                        <img src={quotLogoDataUrl} alt="Company logo" style={{ width: 110, height: 110, objectFit: "contain", borderRadius: 8 }} />
+                      ) : (
+                        <div style={{ width: 110, height: 110, borderRadius: 8, background: dark ? "#0a1525" : "#111827", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          <Ic.image size={38} style={{ color: "#94a3b8" }} />
+                        </div>
+                      )}
+                      <p style={{ fontSize: 12, fontWeight: 700, color: C.text, textAlign: "center" }}>
+                        {quotLogoDataUrl ? "Logo uploaded — tap to change" : "Upload Your Logo Here"}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => quotLogoFileRef.current && quotLogoFileRef.current.click()}
+                      style={{
+                        position: "absolute", bottom: -6, right: -6, width: 34, height: 34, borderRadius: "50%",
+                        background: "#000", border: `2px solid ${C.card}`, color: "#fff", cursor: "pointer",
+                        display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 3px 8px rgba(0,0,0,.35)",
+                      }}
+                      title="Upload logo">
+                      <Ic.camera size={15} />
+                    </button>
+                  </div>
+
+                  <div style={{ height: 1, background: C.border, margin: "6px 0" }} />
+
+                  {/* ── Company / business profile ── */}
+                  <p style={{ fontSize: 10, fontWeight: 700, color: C.sub, textTransform: "uppercase", letterSpacing: "0.07em" }}>Company Details</p>
+                  <div>
+                    <p style={{ fontSize: 10, fontWeight: 700, color: C.sub, marginBottom: 4 }}>Company Name</p>
+                    <input style={inp} value={quotCompanyName} onChange={e => setQuotCompanyName(e.target.value)}
                       onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.border} />
                   </div>
-                  <textarea placeholder="Site address" rows={2} style={{ ...inp, resize: "vertical", fontFamily: "inherit" }} value={quotAddress}
-                    onChange={e => setQuotAddress(e.target.value)}
+                  <input placeholder="Company Gst/Tax No." style={inp} value={quotCompanyGst} onChange={e => setQuotCompanyGst(e.target.value)}
+                    onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.border} />
+                  <div>
+                    <p style={{ fontSize: 10, fontWeight: 700, color: C.sub, marginBottom: 4 }}>Address Line 1</p>
+                    <input style={inp} value={quotCompanyAddress1} onChange={e => setQuotCompanyAddress1(e.target.value)}
+                      onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.border} />
+                  </div>
+                  <div>
+                    <p style={{ fontSize: 10, fontWeight: 700, color: C.sub, marginBottom: 4 }}>Address Line 2</p>
+                    <input style={inp} value={quotCompanyAddress2} onChange={e => setQuotCompanyAddress2(e.target.value)}
+                      onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.border} />
+                  </div>
+                  <div>
+                    <p style={{ fontSize: 10, fontWeight: 700, color: C.sub, marginBottom: 4 }}>Contact No.</p>
+                    <input style={inp} value={quotCompanyContact} onChange={e => setQuotCompanyContact(e.target.value)}
+                      onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.border} />
+                  </div>
+                  <div>
+                    <p style={{ fontSize: 10, fontWeight: 700, color: C.sub, marginBottom: 4 }}>Email Id</p>
+                    <input style={inp} value={quotCompanyEmail} onChange={e => setQuotCompanyEmail(e.target.value)}
+                      onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.border} />
+                  </div>
+                  <input placeholder="Website" style={inp} value={quotWebsite} onChange={e => setQuotWebsite(e.target.value)}
                     onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.border} />
 
+                  <div style={{ height: 1, background: C.border, margin: "6px 0" }} />
+
+                  {/* ── Quotation meta ── */}
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                     <div>
-                      <p style={{ fontSize: 10, fontWeight: 700, color: C.sub, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>Valid Until</p>
-                      <input type="date" style={inp} value={quotValidUntil} onChange={e => setQuotValidUntil(e.target.value)}
+                      <p style={{ fontSize: 10, fontWeight: 700, color: C.sub, marginBottom: 4 }}>Quotation Number</p>
+                      <input style={inp} value={quotationNumber} onChange={e => setQuotationNumber(e.target.value)}
+                        onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.border} />
+                    </div>
+                    <input placeholder="P.O. / S.O. Number" style={inp} value={quotPoNumber} onChange={e => setQuotPoNumber(e.target.value)}
+                      onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.border} />
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                    <div>
+                      <p style={{ fontSize: 10, fontWeight: 700, color: C.sub, marginBottom: 4 }}>Date</p>
+                      <input type="date" style={inp} value={quotDate} onChange={e => setQuotDate(e.target.value)}
                         onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.border} />
                     </div>
                     <div>
-                      <p style={{ fontSize: 10, fontWeight: 700, color: C.sub, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>Tax (%)</p>
-                      <input type="number" placeholder="18" style={inp} value={quotTaxPercent} onChange={e => setQuotTaxPercent(e.target.value)}
+                      <p style={{ fontSize: 10, fontWeight: 700, color: C.sub, marginBottom: 4 }}>Header</p>
+                      <input style={inp} value={quotHeader} onChange={e => setQuotHeader(e.target.value)}
+                        onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.border} />
+                    </div>
+                    <div>
+                      <p style={{ fontSize: 10, fontWeight: 700, color: C.sub, marginBottom: 4 }}>Currency</p>
+                      <input style={inp} value={quotCurrency} onChange={e => setQuotCurrency(e.target.value)}
                         onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.border} />
                     </div>
                   </div>
 
-                  <p style={{ fontSize: 10, fontWeight: 700, color: C.sub, textTransform: "uppercase", letterSpacing: "0.07em", marginTop: 6 }}>Items / Services</p>
+                  <input placeholder="Client Company Name *" style={inp} value={quotClientCompanyName} onChange={e => setQuotClientCompanyName(e.target.value)}
+                    onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.border} />
+                  <input placeholder="Client Gst/Tax No." style={inp} value={quotClientGst} onChange={e => setQuotClientGst(e.target.value)}
+                    onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.border} />
+                  <input placeholder="Client Contact No. *" style={inp} value={quotClientContactNo} onChange={e => setQuotClientContactNo(e.target.value)}
+                    onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.border} />
+                  <input placeholder="Client Email Id" style={inp} value={quotClientEmail} onChange={e => setQuotClientEmail(e.target.value)}
+                    onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.border} />
+                  <input placeholder="Att" style={inp} value={quotAtt} onChange={e => setQuotAtt(e.target.value)}
+                    onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.border} />
+                  <textarea placeholder="Client Address" rows={2} style={{ ...inp, resize: "vertical", fontFamily: "inherit" }} value={quotClientAddress}
+                    onChange={e => setQuotClientAddress(e.target.value)}
+                    onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.border} />
+
+                  <div style={{ height: 1, background: C.border, margin: "6px 0" }} />
+
+                  {/* ── Message block ── */}
+                  <div>
+                    <p style={{ fontSize: 10, fontWeight: 700, color: C.sub, marginBottom: 4 }}>Salutation</p>
+                    <input style={inp} value={quotSalutation} onChange={e => setQuotSalutation(e.target.value)}
+                      onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.border} />
+                  </div>
+                  <div>
+                    <p style={{ fontSize: 10, fontWeight: 700, color: C.sub, marginBottom: 4 }}>Message to Client</p>
+                    <textarea rows={3} style={{ ...inp, resize: "vertical", fontFamily: "inherit" }} value={quotMessage}
+                      onChange={e => setQuotMessage(e.target.value)}
+                      onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.border} />
+                  </div>
+                  <div>
+                    <p style={{ fontSize: 10, fontWeight: 700, color: C.sub, marginBottom: 4 }}>Closing</p>
+                    <input style={inp} value={quotClosing} onChange={e => setQuotClosing(e.target.value)}
+                      onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.border} />
+                  </div>
+                  <div>
+                    <p style={{ fontSize: 10, fontWeight: 700, color: C.sub, marginBottom: 4 }}>Signee</p>
+                    <input style={inp} value={quotSignee} onChange={e => setQuotSignee(e.target.value)}
+                      onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.border} />
+                  </div>
+
+                  <div style={{ height: 1, background: C.border, margin: "6px 0" }} />
+
+                  {/* ── Items ── */}
                   {quotItems.map((row, index) => (
                     <div key={row.id} style={{ background: C.inp, border: `1px solid ${C.border}`, borderRadius: 14, padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -2913,7 +3211,7 @@ const AdminDashboard = () => {
                         <input type="number" placeholder="Qty" value={row.quantity}
                           onChange={e => updateQuotItem(row.id, "quantity", e.target.value)}
                           style={inp} onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.border} />
-                        <input type="number" placeholder="Unit price (₹)" value={row.price}
+                        <input type="number" placeholder={`Unit price (${getCurrencySymbol(quotCurrency)})`} value={row.price}
                           onChange={e => updateQuotItem(row.id, "price", e.target.value)}
                           style={inp} onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.border} />
                       </div>
@@ -2923,27 +3221,35 @@ const AdminDashboard = () => {
                     + Add Item
                   </button>
 
+                  <div style={{ height: 1, background: C.border, margin: "6px 0" }} />
+
+                  {/* ── Footer note + terms + tax ── */}
+                  <textarea rows={2} style={{ ...inp, resize: "vertical", fontFamily: "inherit", fontSize: 12 }} value={quotFooterNote}
+                    onChange={e => setQuotFooterNote(e.target.value)}
+                    onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.border} />
+                  <input placeholder="Quotation terms" style={{ ...inp, fontSize: 12 }} value={quotTermsNote}
+                    onChange={e => setQuotTermsNote(e.target.value)}
+                    onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.border} />
                   <div>
-                    <p style={{ fontSize: 10, fontWeight: 700, color: C.sub, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5, marginTop: 4 }}>Terms & Conditions</p>
-                    <textarea rows={5} style={{ ...inp, resize: "vertical", fontFamily: "inherit", fontSize: 11.5, lineHeight: 1.5 }} value={quotTerms}
-                      onChange={e => setQuotTerms(e.target.value)}
+                    <p style={{ fontSize: 10, fontWeight: 700, color: C.sub, marginBottom: 4 }}>Tax (%)</p>
+                    <input type="number" placeholder="18" style={inp} value={quotTaxPercent} onChange={e => setQuotTaxPercent(e.target.value)}
                       onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.border} />
                   </div>
 
                   <div style={{ background: dark ? "rgba(59,130,246,.08)" : "#eff6ff", border: `1px solid ${C.borderHi}`, borderRadius: 12, padding: "12px 14px", marginTop: 4 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: C.sub, marginBottom: 4 }}>
-                      <span>Subtotal</span><span>₹{quotSubtotal.toLocaleString("en-IN")}</span>
+                      <span>Subtotal</span><span>{getCurrencySymbol(quotCurrency)}{quotSubtotal.toLocaleString("en-IN")}</span>
                     </div>
                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: C.sub, marginBottom: 8 }}>
-                      <span>Tax ({quotTaxPercent || 0}%)</span><span>₹{quotTaxAmount.toLocaleString("en-IN")}</span>
+                      <span>Tax ({quotTaxPercent || 0}%)</span><span>{getCurrencySymbol(quotCurrency)}{quotTaxAmount.toLocaleString("en-IN")}</span>
                     </div>
                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 15, fontWeight: 800, color: C.text, paddingTop: 8, borderTop: `1px solid ${C.borderHi}` }}>
-                      <span>Grand Total</span><span>₹{quotGrandTotal.toLocaleString("en-IN")}</span>
+                      <span>Grand Total</span><span>{getCurrencySymbol(quotCurrency)}{quotGrandTotal.toLocaleString("en-IN")}</span>
                     </div>
                   </div>
 
-                  <button onClick={handleCreateQuotation} disabled={quotSubmitting} style={{ marginTop: 4, padding: "13px", background: "linear-gradient(135deg,#25D366,#128C7E)", color: "#fff", border: "none", borderRadius: 12, fontWeight: 800, fontSize: 13, cursor: quotSubmitting ? "wait" : "pointer", letterSpacing: "0.03em", boxShadow: "0 6px 18px rgba(37,211,102,.35)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: quotSubmitting ? 0.7 : 1 }}>
-                    <Ic.wa size={15} /> {quotSubmitting ? "Generating…" : "Generate & Send via WhatsApp"}
+                  <button onClick={handleCreateQuotation} disabled={quotSubmitting} style={{ marginTop: 4, padding: "14px", background: "#000", color: "#fff", border: "none", borderRadius: 999, fontWeight: 800, fontSize: 13, cursor: quotSubmitting ? "wait" : "pointer", letterSpacing: "0.05em", textTransform: "uppercase", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: quotSubmitting ? 0.7 : 1 }}>
+                    {quotSubmitting ? "Generating…" : "Generate & Preview"}
                   </button>
                 </div>
               </div>
@@ -2966,7 +3272,7 @@ const AdminDashboard = () => {
                     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                       <thead>
                         <tr style={{ background: dark ? "#0c1526" : "#f8fafc", borderBottom: `1px solid ${C.border}` }}>
-                          {["Quotation #", "Client", "Total", "Valid Until", ""].map((h, i) => (
+                          {["Quotation #", "Client", "Total", "Date", ""].map((h, i) => (
                             <th key={i} style={{ padding: "13px 18px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.09em", color: C.sub, textAlign: i >= 4 ? "right" : "left" }}>{h}</th>
                           ))}
                         </tr>
@@ -2980,14 +3286,14 @@ const AdminDashboard = () => {
                               <p style={{ fontWeight: 700, fontSize: 12.5 }}>{q.quotationNumber}</p>
                             </td>
                             <td style={{ padding: "15px 18px" }}>
-                              <p style={{ fontWeight: 600, marginBottom: 1 }}>{q.clientName}</p>
-                              <p style={{ fontSize: 11, color: C.sub }}>{q.phone}</p>
+                              <p style={{ fontWeight: 600, marginBottom: 1 }}>{q.clientCompanyName || q.clientName || "—"}</p>
+                              <p style={{ fontSize: 11, color: C.sub }}>{q.clientContactNo || q.phone || ""}</p>
                             </td>
                             <td style={{ padding: "15px 18px" }}>
-                              <p style={{ fontWeight: 700 }}>₹{(q.grandTotal || 0).toLocaleString("en-IN")}</p>
+                              <p style={{ fontWeight: 700 }}>{getCurrencySymbol(q.currency)}{(q.grandTotal || 0).toLocaleString("en-IN")}</p>
                             </td>
                             <td style={{ padding: "15px 18px" }}>
-                              <span style={{ fontSize: 11, fontWeight: 600, background: dark ? "#1e293b" : "#f1f5f9", color: C.sub, padding: "4px 10px", borderRadius: 8 }}>{q.validUntil || "—"}</span>
+                              <span style={{ fontSize: 11, fontWeight: 600, background: dark ? "#1e293b" : "#f1f5f9", color: C.sub, padding: "4px 10px", borderRadius: 8 }}>{q.date || q.validUntil || "—"}</span>
                             </td>
                             <td style={{ padding: "15px 18px" }}>
                               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
@@ -3668,6 +3974,60 @@ const AdminDashboard = () => {
                   </div>
                 ))
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ QUOTATION PREVIEW MODAL ══
+           Shows the freshly-generated PDF before anything is uploaded,
+           saved, or sent. Closing it discards the draft entirely; only
+           "Send via WhatsApp" commits it. */}
+      {showQuotPreview && quotPreview && (
+        <div onClick={closeQuotPreview} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", backdropFilter: "blur(6px)", zIndex: 80, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div onClick={e => e.stopPropagation()} style={{ ...card(), width: "100%", maxWidth: 860, height: "90vh", overflow: "hidden", display: "flex", flexDirection: "column", animation: "slideUp .2s ease" }}>
+            <div style={{ background: "linear-gradient(135deg,#3b82f6,#6366f1)", padding: "18px 24px", flexShrink: 0 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+                <div style={{ minWidth: 0 }}>
+                  <p style={{ color: "rgba(255,255,255,.75)", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>Preview Before Sending</p>
+                  <p style={{ color: "#fff", fontWeight: 800, fontSize: 16 }}>
+                    {quotPreview.snapshot.quotationNumber} · {quotPreview.snapshot.clientCompanyName}
+                  </p>
+                  <p style={{ color: "rgba(255,255,255,.8)", fontSize: 12, marginTop: 2 }}>
+                    Total: {quotPreview.sym}{(quotPreview.snapshot.grandTotal || 0).toLocaleString("en-IN")} &nbsp;·&nbsp; Sending to {quotPreview.cleanPhone}
+                  </p>
+                </div>
+                <button onClick={closeQuotPreview} style={{ background: "rgba(255,255,255,.2)", border: "none", borderRadius: 8, width: 30, height: 30, color: "#fff", fontSize: 18, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1, flexShrink: 0 }}>×</button>
+              </div>
+            </div>
+
+            {/* Embedded PDF preview */}
+            <div style={{ flex: 1, minHeight: 0, background: dark ? "#0a1525" : "#f1f5f9" }}>
+              <iframe
+                title="Quotation preview"
+                src={quotPreview.previewUrl}
+                style={{ width: "100%", height: "100%", border: "none" }}
+              />
+            </div>
+
+            <div style={{ padding: "14px 20px", borderTop: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", flexShrink: 0 }}>
+              <p style={{ fontSize: 11.5, color: C.sub, fontWeight: 600 }}>
+                Nothing has been saved or sent yet — check it over, then confirm.
+              </p>
+              <div style={{ display: "flex", gap: 10, flexShrink: 0 }}>
+                <a href={quotPreview.previewUrl} target="_blank" rel="noreferrer"
+                  style={{ ...btn("transparent", C.accent, { border: `1.5px solid ${C.borderHi}`, textDecoration: "none", fontSize: 12 }) }}>
+                  Open in New Tab
+                </a>
+                <button onClick={closeQuotPreview} disabled={quotSending}
+                  style={{ ...btn("transparent", C.sub, { border: `1.5px solid ${C.border}`, fontSize: 12 }) }}>
+                  Back & Edit
+                </button>
+                <button onClick={handleConfirmSendQuotation} disabled={quotSending}
+                  style={{ ...btn("linear-gradient(135deg,#25D366,#128C7E)", "#fff", { fontSize: 12.5, padding: "11px 22px", boxShadow: "0 5px 14px rgba(37,211,102,.35)", cursor: quotSending ? "wait" : "pointer", opacity: quotSending ? 0.7 : 1 }) }}>
+                  <Ic.wa size={14} /> {quotSending ? "Sending…" : "Send via WhatsApp"}
+                </button>
+              </div>
             </div>
           </div>
         </div>
